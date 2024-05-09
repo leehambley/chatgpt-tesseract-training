@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -18,21 +18,21 @@
         margin-top: 10px;
       }
 
-    .highlight {
+      .highlight {
         background-color: yellow;
         font-weight: bolder;
-    }
+      }
 
-    th, td {
+      th,
+      td {
         padding: 4px;
         text-align: left;
-    }
+      }
 
-    input[type="text"],
+      input[type="text"],
       button {
         width: 100%;
       }
-
     </style>
   </head>
 
@@ -41,17 +41,22 @@
     <script src="https://unpkg.com/react@17/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js.map"></script>
+
     <script type="text/babel">
       const { useState, useRef, useEffect } = React;
 
       function ImageAnnotator() {
         const [image, setImage] = useState(
-          localStorage.getItem("image") || null
+          localStorage.getItem("image") || null,
         );
         const [rectangles, setRectangles] = useState(
-          JSON.parse(localStorage.getItem("rectangles")) || []
+          JSON.parse(localStorage.getItem("rectangles")) || [],
         );
+
+        const [draggingRectIndex, setDraggingRectIndex] = useState(-1); // Index of the rectangle being dragged
+        const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 }); // Offset from the top-left corner of the rectangle to the mouse pointer
+
         const [scale, setScale] = useState(1);
         const [originX, setOriginX] = useState(0);
         const [originY, setOriginY] = useState(0);
@@ -61,31 +66,14 @@
         const [imageLoaded, setImageLoaded] = useState(false);
         const canvasRef = useRef(null);
         const [selectedRectIndex, setSelectedRectIndex] = useState(null);
-        const [focusedRectIndex, setFocusedRectIndex] = useState(null);
         const imgRef = useRef(null);
 
-        useEffect(() => {
-            const handleKeyPress = (event) => {
-                console.log(`Pressed key: ${event.key}`);
-                console.log(`focusedRectIndex ${focusedRectIndex}`);
-                console.log(`selectedRectIndex ${selectedRectIndex}`);
-            };
-
-            window.addEventListener('keypress', handleKeyPress);
-
-            // Cleanup function to remove the event listener when the component unmounts
-            return () => {
-                window.removeEventListener('keypress', handleKeyPress);
-            };
-        }, []); // Empty dependency array means this effect runs once on mount and cleanup on unmount
-
-
         const handleReset = () => {
-            if (window.confirm('Are you sure you want to reset?')) {
-                setRectangles([]);
-                setImageLoaded(false);
-                drawImageAndRectangles();
-            }
+          if (window.confirm("Are you sure you want to reset?")) {
+            setRectangles([]);
+            setImageLoaded(false);
+            drawImageAndRectangles();
+          }
         };
 
         const handleImageChange = (event) => {
@@ -108,91 +96,162 @@
           setImageLoaded(false); // Set imageLoaded to false when a new image is loaded
         };
 
-        // const drawImageAndRectangles = () => {
+        // make cursor into the dragging cursor when dragging
+        // useEffect(() => {
         //   const canvas = canvasRef.current;
-        //   const ctx = canvas.getContext("2d");
-        //   if (imageLoaded) {
-        //     const img = imgRef.current;
-        //     ctx.save();
-        //     ctx.clearRect(0, 0, canvas.width, canvas.height);
-        //     ctx.translate(originX, originY);
-        //     ctx.scale(scale, scale);
-        //     ctx.drawImage(img, 0, 0);
-        //     rectangles.concat(newRect ? [newRect] : []).forEach((rect, index) => {
-        //       ctx.strokeStyle = "red";
-        //       ctx.beginPath();
-        //       ctx.rect(rect.x, rect.y, rect.width, rect.height);
-        //       ctx.strokeStyle = index === selectedRectIndex ? 'yellow' : 'red';
-        //       ctx.stroke();
-        //       ctx.fillText(rect.label, rect.x, rect.y - 10, rect.width); // Ensure text fits in the rectangle
-        //     });
-        //     ctx.restore();
+        // //   console.log({ draggingRectIndex, drawing });
+        //   if (!drawing && draggingRectIndex !== -1) {
+        //     // If a rectangle is being dragged, change the cursor to 'move'
+        //     canvas.style.cursor = "move";
+        //   } else {
+        //     // If no rectangle is being dragged, change the cursor back to 'default'
+        //     canvas.style.cursor = "default";
         //   }
-        // };
+        // }, [draggingRectIndex]);
+
+        // Function to check if two rectangles intersect
+        const checkIntersection = (rect1, rect2) => {
+          return (
+            rect1.x < rect2.x + rect2.width &&
+            rect2.x < rect1.x + rect1.width &&
+            rect1.y < rect2.y + rect2.height &&
+            rect2.y < rect1.y + rect1.height
+          );
+        };
 
         const drawImageAndRectangles = () => {
-            const canvas = canvasRef.current;
-            const ctx = canvas.getContext("2d");
-            if (imageLoaded) {
-                const img = imgRef.current;
-                ctx.save();
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                ctx.translate(originX, originY);
-                ctx.scale(scale, scale);
-                ctx.drawImage(img, 0, 0);
+          const canvas = canvasRef.current;
+          const ctx = canvas.getContext("2d");
+          if (imageLoaded) {
+            const img = imgRef.current;
+            ctx.save();
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.translate(originX, originY);
+            ctx.scale(scale, scale);
+            ctx.drawImage(img, 0, 0);
 
-                // Draw rectangles
-                rectangles.forEach((rect, index) => {
-                    ctx.beginPath();
-                    if (index === selectedRectIndex) {
-                        // Style for selected rectangle
-                        ctx.strokeStyle = 'blue';
-                        ctx.fillStyle = 'rgba(0, 0, 255, 0.3)'; // 30% opaque blue
-                    } else {
-                        // Style for normal rectangles
-                        ctx.strokeStyle = 'red';
-                        ctx.fillStyle = 'transparent';
-                    }
-                    ctx.rect(rect.x, rect.y, rect.width, rect.height);
-                    ctx.stroke();
-                    ctx.fill();
-                    ctx.fillText(rect.label, rect.x, rect.y - 10, rect.width); // Ensure text fits in the rectangle
-                });
+            // Draw rectangles
+            rectangles.forEach((rect, index) => {
+              ctx.beginPath();
+              if (index === selectedRectIndex) {
+                // Style for selected rectangle
+                ctx.strokeStyle = "red";
+                ctx.fillStyle = "rgba(211, 211, 211, 0.3)"; // 30% opaque neon yellow
+              } else {
+                // Style for normal rectangles
+                ctx.strokeStyle = "red";
+                ctx.fillStyle = "transparent";
+              }
+              console.log({ rect1: rect });
+              ctx.rect(rect.x, rect.y, rect.width, rect.height);
+              ctx.stroke();
+              ctx.fill();
 
-                // Draw newRect
-                if (newRect) {
-                    ctx.beginPath();
-                    // Style for newRect
-                    ctx.strokeStyle = 'red';
-                    ctx.fillStyle = 'rgba(255, 0, 0, 0.3)'; // 30% opaque red
-                    ctx.rect(newRect.x, newRect.y, newRect.width, newRect.height);
-                    ctx.stroke();
-                    ctx.fill();
-                }
+              if (rect.label) {
+                // Set the font, fill style, and text shadow for the label
+                ctx.font = "16px Arial";
+                ctx.fillStyle = "white";
+                ctx.textBaseline = "top";
+                ctx.shadowColor = "black";
+                ctx.shadowOffsetX = 1;
+                ctx.shadowOffsetY = 1;
+                ctx.shadowBlur = 2;
 
-                ctx.restore();
+                const textMetrics = ctx.measureText(rect.label);
+                ctx.fillRect(
+                  rect.x,
+                  rect.y,
+                  textMetrics.width,
+                  parseInt(ctx.font, 10),
+                );
+
+                // Draw the label
+                ctx.fillText(rect.label, rect.x, rect.y);
+              }
+            });
+
+            // Draw newRect
+            if (newRect) {
+              ctx.beginPath();
+              // Style for newRect
+              ctx.strokeStyle = "red";
+              ctx.fillStyle = "rgba(255, 0, 0, 0.3)"; // 30% opaque red
+              ctx.rect(newRect.x, newRect.y, newRect.width, newRect.height);
+              ctx.stroke();
+              ctx.fill();
             }
+
+            ctx.restore();
+          }
         };
 
         useEffect(() => {
           drawImageAndRectangles();
-        }, [rectangles, originX, originY, scale, imageLoaded, newRect]);
+        }, [
+          rectangles,
+          selectedRectIndex,
+          originX,
+          originY,
+          scale,
+          imageLoaded,
+        //   draggingRectIndex,
+          newRect,
+        ]);
 
         useEffect(() => {
           localStorage.setItem("rectangles", JSON.stringify(rectangles)); // Store rectangles in localStorage whenever they change
         }, [rectangles]);
 
         const handleMouseDown = (e) => {
-            const rect = canvasRef.current.getBoundingClientRect();
-            const x = (e.clientX - rect.left - originX) / scale;
-            const y = (e.clientY - rect.top - originY) / scale;
+          const canvas = canvasRef.current;
+          const rect = canvasRef.current.getBoundingClientRect();
+          console.log({ mousedown: rect });
+          const adjustedX = (e.clientX - rect.left - originX) / scale;
+          const adjustedY = (e.clientY - rect.top - originY) / scale;
+
+          // Check if a rectangle was clicked
+          const clickedRectIndex = rectangles.findIndex(
+            (rect) =>
+              adjustedX >= rect.x &&
+              adjustedX <= rect.x + rect.width &&
+              adjustedY >= rect.y &&
+              adjustedY <= rect.y + rect.height,
+          );
+
+          if (clickedRectIndex !== -1) {
+            setSelectedRectIndex(clickedRectIndex);
+          } else {
             setDrawing(true);
-            setNewRect({ x: Math.round(x), y: Math.round(y), width: 0, height: 0 });
+            setNewRect({ x: adjustedX, y: adjustedY, width: 0, height: 0 });
+          }
         };
 
         const handleMouseMove = (e) => {
-          if (drawing && newRect) {
+          const rect = canvasRef.current.getBoundingClientRect();
+          const adjustedX = (e.clientX - rect.left - originX) / scale;
+          const adjustedY = (e.clientY - rect.top - originY) / scale;
+
+        //   console.log({boop: draggingRectIndex});
+        //   if (draggingRectIndex !== -1) {
+        //     setDragOffset({
+        //       x: adjustedX - rectangles[draggingRectIndex].x,
+        //       y: adjustedY - rectangles[draggingRectIndex].y,
+        //     });
+        //   }
+        //   if (selectedRectIndex && !newRect) {
+            // // If a rectangle is being dragged, update its position
+            // const updatedRectangles = [...rectangles];
+            // // setDraggingRectIndex(selectedRectIndex); TODO bug here?
+            // updatedRectangles[selectedRectIndex] = {
+            //   ...updatedRectangles[selectedRectIndex],
+            //   x: e.clientX - dragOffset.x,
+            //   y: e.clientY - dragOffset.y,
+            // };
+            // setRectangles(updatedRectangles);
+          
+            if (drawing && newRect) {
             const rect = canvasRef.current.getBoundingClientRect();
+            // console.log({ mousemove: rect });
             const moveX = (e.clientX - rect.left - originX) / scale;
             const moveY = (e.clientY - rect.top - originY) / scale;
             setNewRect({
@@ -200,83 +259,84 @@
               width: moveX - newRect.x,
               height: moveY - newRect.y,
             });
-          } else {
-            const rect = canvasRef.current.getBoundingClientRect();
-            const x = (e.clientX - rect.left - originX) / scale;
-            const y = (e.clientY - rect.top - originY) / scale;
-            const index = rectangles.findIndex(rect => x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height);
-            setSelectedRectIndex(index !== -1 ? index : null);
           }
         };
 
         const handleMouseUp = () => {
-            if (drawing && newRect) {
-                const updatedRectangles = [
-            ...rectangles,
-            {
-                ...newRect,
-                x: Math.round(newRect.x),
-                y: Math.round(newRect.y),
-                width: Math.round(newRect.width),
-                height: Math.round(newRect.height)
+          if (drawing && newRect) {
+            let { x, y, width, height } = newRect;
+            setDrawing(false);
+
+            // If width is negative, adjust x and make width positive
+            if (width < 0) {
+              x = x + width;
+              width = Math.abs(width);
             }
-        ].filter(rect => rect.width !== 0 && rect.height !== 0);
-                setRectangles(updatedRectangles);
-                setDrawing(false);
-                setNewRect(null);
-                setSelectedRectIndex(rectangles.length);
+
+            // If height is negative, adjust y and make height positive
+            if (height < 0) {
+              y = y + height;
+              height = Math.abs(height);
             }
+            const updatedRect = {
+              x: Math.round(x),
+              y: Math.round(y),
+              width: Math.round(width),
+              height: Math.round(height),
+            };
+            const updatedRectangles = [...rectangles, updatedRect].filter(
+              (rect) => rect.width !== 0 && rect.height !== 0,
+            );
+
+            const intersects = rectangles.some((rect) =>
+              checkIntersection(newRect, rect),
+            );
+            if (!intersects) {
+              setRectangles(updatedRectangles);
+              setSelectedRectIndex(rectangles.length);
+            }
+            setNewRect(null);
+          }
+        //   setDraggingRectIndex(-1);
         };
 
-        // // Truncate the rectangle coordinates to integers any time the rectangles change
-        // useEffect(() => {
-        //     const filteredRectangles = rectangles.filter(rect => rect.width !== 0 && rect.height !== 0);
-        //     const truncatedRectangles = filteredRectangles.map(rect => ({
-        //         ...rect,
-        //         x: Math.round(rect.x),
-        //         y: Math.round(rect.y),
-        //         width: Math.round(rect.width),
-        //         height: Math.round(rect.height)
-        //     }));
-        //     setRectangles(truncatedRectangles);
-        // }, [rectangles]);
-
         useEffect(() => {
-            const handleKeyDown = (e) => {
-                if (/^[a-z0-9]$/i.test(e.key)) {
-                    const updatedRectangles = [...rectangles];
-                    let targetRectIndex = null;
+          const handleKeyDown = (e) => {
+            if (/^[a-z0-9-+=_\!\@\#\$\%\^\&\*\(\)]$/i.test(e.key)) {
+              const updatedRectangles = [...rectangles];
+            //   let targetRectIndex = null;
 
-                    if (newRect) {
-                        targetRectIndex = rectangles.findIndex(rect => rect === newRect);
-                    } else if (selectedRectIndex !== null) {
-                        targetRectIndex = selectedRectIndex;
-                    } else if (focusedRectIndex !== null) {
-                        targetRectIndex = focusedRectIndex;
-                    }
+            //   if (newRect) {
+            //     targetRectIndex = rectangles.findIndex(
+            //       (rect) => rect === newRect,
+            //     );
+            //   } else if (selectedRectIndex !== null) {
+            //     targetRectIndex = selectedRectIndex;
+            //   }
 
-                    if (targetRectIndex !== null) {
-                        updatedRectangles[targetRectIndex] = {
-                            ...updatedRectangles[targetRectIndex],
-                            label: e.key.toUpperCase(),
-                        };
-                        setRectangles(updatedRectangles);
-                    }
-                }
-            };
+              if (selectedRectIndex !== -1) {
+                updatedRectangles[selectedRectIndex] = {
+                  ...updatedRectangles[selectedRectIndex],
+                  label: e.key.toUpperCase(),
+                };
+                setRectangles(updatedRectangles);
+              }
+            }
+          };
 
-            window.addEventListener("keydown", handleKeyDown);
+          window.addEventListener("keydown", handleKeyDown);
 
-            return () => {
-                window.removeEventListener("keydown", handleKeyDown);
-            };
-        }, [newRect, selectedRectIndex, focusedRectIndex, rectangles]);
+          return () => {
+            window.removeEventListener("keydown", handleKeyDown);
+          };
+        }, [newRect, selectedRectIndex, rectangles]);
 
         useEffect(() => {
           const canvas = canvasRef.current;
           const handleWheel = (e) => {
             e.preventDefault();
             const rect = canvas.getBoundingClientRect();
+            console.log({ getBoundingClientRect: rect });
             const x = (e.clientX - rect.left - originX) / scale;
             const y = (e.clientY - rect.top - originY) / scale;
             const deltaScale = e.deltaY * -0.005;
@@ -301,15 +361,18 @@
         };
 
         const handleDelete = (index) => {
-            const updatedRectangles = rectangles.filter((_, i) => i !== index);
-            setRectangles(updatedRectangles);
+          const updatedRectangles = rectangles.filter((_, i) => i !== index);
+          setRectangles(updatedRectangles);
         };
 
+        console.log({ rectangles: rectangles });
+
+        
         return (
           <div
             style={{
               display: "flex",
-              flexDirection: "column",
+              flexDirection: "row",
               alignItems: "center",
             }}
           >
@@ -353,13 +416,36 @@
                 </thead>
                 <tbody>
                   {rectangles.map((rect, index) => (
-                    <tr key={index} className={index === focusedRectIndex ? 'highlight' : ''}>
-                        <td>{rect.label}</td>
-                        <td>{rect.x}</td>
-                        <td>{rect.y}</td>
-                        <td>{rect.width}</td>
-                        <td>{rect.height}</td>
-                        <td><button onClick={() => handleDelete(index)}>Delete</button></td>
+                    <tr
+                      key={index}
+                      className={index == selectedRectIndex ? "highlight" : ""}
+                      onClick={() => setSelectedRectIndex(index)}
+                    >
+                      <td><input
+          type="text"
+          value={
+            rect.label
+          }
+        //   onChange={(e) => {
+        //     // if (selectedRectIndex !== null) {
+        //     //   const newRectangles = [...rectangles];
+        //     //   newRectangles[selectedRectIndex].label =
+        //     //     e.target.value;
+        //     //   setRectangles(newRectangles);
+        //     //   drawImageAndRectangles(); // call your drawing function
+        //     // }
+        //   }}
+        />
+</td>
+                      <td>{rect.x}</td>
+                      <td>{rect.y}</td>
+                      <td>{rect.width}</td>
+                      <td>{rect.height}</td>
+                      <td>
+                        <button onClick={() => handleDelete(index)}>
+                          Delete
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
