@@ -1,4 +1,4 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -7,6 +7,45 @@
     <style>
       body {
         font-family: Arial, sans-serif;
+        overflow: hidden;
+      }
+
+      canvas {
+        cursor: crosshair;
+      }
+
+      .flex-container {
+        display: flex;
+        flex-direction: column;
+      }
+
+      .flex-container {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+      }
+
+      .full-width {
+        flex: 1;
+        width: 100%;
+      }
+
+      .flex-row {
+        display: flex;
+        flex-direction: row;
+        width: 100%;
+      }
+
+      .half-width {
+        flex: 1;
+      }
+
+      .third-width {
+        flex: 0.6;
+      }
+
+      .fifth-width {
+        flex: 0.4;
       }
 
       canvas {
@@ -21,6 +60,12 @@
       .highlight {
         background-color: yellow;
         font-weight: bolder;
+      }
+
+      .scrollableDiv,
+      .scrollableTable {
+        height: 100vh;
+        overflow-y: auto;
       }
 
       th,
@@ -44,428 +89,499 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js.map"></script>
 
     <script type="text/babel">
-            const { useState, useRef, useEffect } = React;
+      const { useState, useRef, useEffect } = React;
 
-            class ErrorBoundary extends React.Component {
-              constructor(props) {
-                  super(props);
-                  this.state = { hasError: false };
-              }
+      function ImageAnnotator() {
+        const [image, setImage] = useState(
+          localStorage.getItem("image") || null
+        );
+        const [rectangles, setRectangles] = useState(
+          JSON.parse(localStorage.getItem("rectangles")) || []
+        );
 
-              static getDerivedStateFromError(error) {    // Update state so the next render will show the fallback UI.    return { hasError: true };  }
-              componentDidCatch(error, errorInfo) {    // You can also log the error to an error reporting service    logErrorToMyService(error, errorInfo);  }
-              render() {
-                  if (this.state.hasError) {      // You can render any custom fallback UI      return <h1>Something went wrong.</h1>;    }
-                  return this.props.children;
-              }
-              }
+        const [draggingRectIndex, setDraggingRectIndex] = useState(-1); // Index of the rectangle being dragged
+        const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 }); // Offset from the top-left corner of the rectangle to the mouse pointer
 
-            function ImageAnnotator() {
-              const [image, setImage] = useState(
-                localStorage.getItem("image") || null,
-              );
-              const [rectangles, setRectangles] = useState(
-                JSON.parse(localStorage.getItem("rectangles")) || [],
-              );
+        const [scale, setScale] = useState(1);
+        const [originX, setOriginX] = useState(0);
+        const [originY, setOriginY] = useState(0);
+        const [dragStart, setDragStart] = useState(null);
+        const [drawing, setDrawing] = useState(false);
+        const [newRect, setNewRect] = useState(null);
+        const [imageLoaded, setImageLoaded] = useState(false);
+        const canvasRef = useRef(null);
+        const [tooltip, setTooltip] = useState("");
+        const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
+        const [selectedRectIndex, setSelectedRectIndex] = useState(null);
+        const imgRef = useRef(null);
+        const rowRefs = useRef(rectangles.map(() => React.createRef()));
 
-              const [draggingRectIndex, setDraggingRectIndex] = useState(-1); // Index of the rectangle being dragged
-              const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 }); // Offset from the top-left corner of the rectangle to the mouse pointer
+        const handleReset = () => {
+          if (window.confirm("Are you sure you want to reset?")) {
+            setRectangles([]);
+            setImageLoaded(false);
+            drawImageAndRectangles();
+          }
+        };
 
-              const [scale, setScale] = useState(1);
-              const [originX, setOriginX] = useState(0);
-              const [originY, setOriginY] = useState(0);
-              const [dragStart, setDragStart] = useState(null);
-              const [drawing, setDrawing] = useState(false);
-              const [newRect, setNewRect] = useState(null);
-              const [imageLoaded, setImageLoaded] = useState(false);
-              const canvasRef = useRef(null);
-              const [selectedRectIndex, setSelectedRectIndex] = useState(null);
-              const imgRef = useRef(null);
+        useEffect(() => {
+          try {
+            rowRefs.current[selectedRectIndex].current.scrollIntoView({
+              behavior: "smooth",
+              block: "nearest",
+            });
+          } catch {
+            /* do nothing */
+          }
+        }, [selectedRectIndex]);
 
-              const handleReset = () => {
-                if (window.confirm("Are you sure you want to reset?")) {
-                  setRectangles([]);
-                  setImageLoaded(false);
-                  drawImageAndRectangles();
-                }
-              };
+        useEffect(() => {
+          rowRefs.current = rectangles.map(() => React.createRef());
+        }, [rectangles]);
 
-              const handleImageChange = (event) => {
-                const file = event.target.files[0];
-                if (file) {
-                  const reader = new FileReader();
-                  reader.onload = (e) => {
-                    setImage(e.target.result);
-                    localStorage.setItem("image", e.target.result); // Store image data in localStorage
-                    resetView();
-                  };
-                  reader.readAsDataURL(file);
-                }
-              };
+        const handleImageChange = (event) => {
+          const file = event.target.files[0];
+          if (file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+              setImage(e.target.result);
+              localStorage.setItem("image", e.target.result); // Store image data in localStorage
+              resetView();
+            };
+            reader.readAsDataURL(file);
+          }
+        };
 
-              const resetView = () => {
-                setOriginX(0);
-                setOriginY(0);
-                setScale(1);
-                setImageLoaded(false); // Set imageLoaded to false when a new image is loaded
-              };
+        const resizeCanvasToDisplaySize = (canvas) => {
+          // Get the size the browser is displaying the canvas.
+          var displayWidth = canvas.clientWidth;
+          var displayHeight = canvas.clientHeight;
 
-              // make cursor into the dragging cursor when dragging
-              // useEffect(() => {
-              //   const canvas = canvasRef.current;
-              // //   console.log({ draggingRectIndex, drawing });
-              //   if (!drawing && draggingRectIndex !== -1) {
-              //     // If a rectangle is being dragged, change the cursor to 'move'
-              //     canvas.style.cursor = "move";
-              //   } else {
-              //     // If no rectangle is being dragged, change the cursor back to 'default'
-              //     canvas.style.cursor = "default";
-              //   }
-              // }, [draggingRectIndex]);
+          // Check if the canvas size is different from its display size.
+          if (
+            canvas.width !== displayWidth ||
+            canvas.height !== displayHeight
+          ) {
+            // Make the canvas the same size
+            canvas.width = displayWidth;
+            canvas.height = displayHeight;
+          }
+        };
 
-              // Function to check if two rectangles intersect
-              const checkIntersection = (rect1, rect2) => {
-                return (
-                  rect1.x < rect2.x + rect2.width &&
-                  rect2.x < rect1.x + rect1.width &&
-                  rect1.y < rect2.y + rect2.height &&
-                  rect2.y < rect1.y + rect1.height
-                );
-              };
+        const resetView = () => {
+          setOriginX(0);
+          setOriginY(0);
+          setScale(1);
+          setImageLoaded(false); // Set imageLoaded to false when a new image is loaded
+        };
 
-              const drawImageAndRectangles = () => {
-                const canvas = canvasRef.current;
-                const ctx = canvas.getContext("2d");
-                if (imageLoaded) {
-                  const img = imgRef.current;
-                  ctx.save();
-                  ctx.clearRect(0, 0, canvas.width, canvas.height);
-                  ctx.translate(originX, originY);
-                  ctx.scale(scale, scale);
-                  ctx.drawImage(img, 0, 0);
+        const Tooltip = ({ text, position }) => (
+          <div
+            style={{
+              position: "fixed",
+              top: position.y,
+              left: position.x,
+              backgroundColor: "white",
+              border: "1px solid black",
+              padding: "5px",
+              zIndex: 1000,
+            }}
+          >
+            {text}
+          </div>
+        );
 
-                  // Draw rectangles
-                  rectangles.forEach((rect, index) => {
-                    ctx.beginPath();
-                    if (index === selectedRectIndex) {
-                      // Style for selected rectangle
-                      ctx.strokeStyle = "red";
-                      ctx.fillStyle = "rgba(211, 211, 211, 0.3)"; // 30% opaque neon yellow
-                    } else {
-                      // Style for normal rectangles
-                      ctx.strokeStyle = "red";
-                      ctx.fillStyle = "transparent";
-                    }
-                    console.log({ rect1: rect });
-                    ctx.rect(rect.x, rect.y, rect.width, rect.height);
-                    ctx.stroke();
-                    ctx.fill();
+        useEffect(() => {
+          const handleMouseDown = (e) => {
+            if (e.button === 1) {
+              setDragStart({ x: e.clientX, y: e.clientY });
+            }
+          };
 
-                    if (rect.label) {
-                      // Set the font, fill style, and text shadow for the label
-                      ctx.font = "16px Arial";
-                      ctx.fillStyle = "white";
-                      ctx.textBaseline = "top";
-
-                      const textMetrics = ctx.measureText(rect.label);
-                      ctx.fillRect(
-                        rect.x,
-                        rect.y,
-                        textMetrics.width,
-                        parseInt(ctx.font, 10),
-                      );
-
-                      // Draw the label
-                      ctx.fillText(rect.label, rect.x, rect.y);
-                    }
-                  });
-
-                  // Draw newRect
-                  if (newRect) {
-                    ctx.beginPath();
-                    // Style for newRect
-                    ctx.strokeStyle = "red";
-                    ctx.fillStyle = "rgba(255, 0, 0, 0.3)"; // 30% opaque red
-                    ctx.rect(newRect.x, newRect.y, newRect.width, newRect.height);
-                    ctx.stroke();
-                    ctx.fill();
-                  }
-
-                  ctx.restore();
-                }
-              };
-
-              useEffect(() => {
-                drawImageAndRectangles();
-              }, [
-                rectangles,
-                selectedRectIndex,
-                originX,
-                originY,
-                scale,
-                imageLoaded,
-              //   draggingRectIndex,
-                newRect,
-              ]);
-
-              useEffect(() => {
-                localStorage.setItem("rectangles", JSON.stringify(rectangles)); // Store rectangles in localStorage whenever they change
-              }, [rectangles]);
-
-              const handleMouseDown = (e) => {
-                const canvas = canvasRef.current;
-                const rect = canvasRef.current.getBoundingClientRect();
-                console.log({ mousedown: rect });
-                const adjustedX = (e.clientX - rect.left - originX) / scale;
-                const adjustedY = (e.clientY - rect.top - originY) / scale;
-
-                // Check if a rectangle was clicked
-                const clickedRectIndex = rectangles.findIndex(
-                  (rect) =>
-                    adjustedX >= rect.x &&
-                    adjustedX <= rect.x + rect.width &&
-                    adjustedY >= rect.y &&
-                    adjustedY <= rect.y + rect.height,
-                );
-
-                if (clickedRectIndex !== -1) {
-                  setSelectedRectIndex(clickedRectIndex);
-                } else {
-                  setDrawing(true);
-                  setNewRect({ x: adjustedX, y: adjustedY, width: 0, height: 0 });
-                }
-              };
-
-              const handleMouseMove = (e) => {
-                const rect = canvasRef.current.getBoundingClientRect();
-                const adjustedX = (e.clientX - rect.left - originX) / scale;
-                const adjustedY = (e.clientY - rect.top - originY) / scale;
-
-              //   console.log({boop: draggingRectIndex});
-              //   if (draggingRectIndex !== -1) {
-              //     setDragOffset({
-              //       x: adjustedX - rectangles[draggingRectIndex].x,
-              //       y: adjustedY - rectangles[draggingRectIndex].y,
-              //     });
-              //   }
-              //   if (selectedRectIndex && !newRect) {
-                  // // If a rectangle is being dragged, update its position
-                  // const updatedRectangles = [...rectangles];
-                  // // setDraggingRectIndex(selectedRectIndex); TODO bug here?
-                  // updatedRectangles[selectedRectIndex] = {
-                  //   ...updatedRectangles[selectedRectIndex],
-                  //   x: e.clientX - dragOffset.x,
-                  //   y: e.clientY - dragOffset.y,
-                  // };
-                  // setRectangles(updatedRectangles);
-
-                  if (drawing && newRect) {
-                  const rect = canvasRef.current.getBoundingClientRect();
-                  // console.log({ mousemove: rect });
-                  const moveX = (e.clientX - rect.left - originX) / scale;
-                  const moveY = (e.clientY - rect.top - originY) / scale;
-                  setNewRect({
-                    ...newRect,
-                    width: moveX - newRect.x,
-                    height: moveY - newRect.y,
-                  });
-                }
-              };
-
-              const handleMouseUp = () => {
-                if (drawing && newRect) {
-                  let { x, y, width, height } = newRect;
-                  setDrawing(false);
-
-                  // If width is negative, adjust x and make width positive
-                  if (width < 0) {
-                    x = x + width;
-                    width = Math.abs(width);
-                  }
-
-                  // If height is negative, adjust y and make height positive
-                  if (height < 0) {
-                    y = y + height;
-                    height = Math.abs(height);
-                  }
-                  const updatedRect = {
-                    x: Math.round(x),
-                    y: Math.round(y),
-                    width: Math.round(width),
-                    height: Math.round(height),
-                  };
-                  const updatedRectangles = [...rectangles, updatedRect].filter(
-                    (rect) => rect.width !== 0 && rect.height !== 0,
-                  );
-
-                  const intersects = rectangles.some((rect) =>
-                    checkIntersection(newRect, rect),
-                  );
-                  if (!intersects) {
-                    setRectangles(updatedRectangles);
-                    setSelectedRectIndex(rectangles.length);
-                  }
-                  setNewRect(null);
-                }
-              //   setDraggingRectIndex(-1);
-              };
-
-              useEffect(() => {
-                const handleKeyDown = (e) => {
-                  if (/^[a-z0-9-+=_\!\@\#\$\%\^\&\*\(\)]$/i.test(e.key)) {
-                    const updatedRectangles = [...rectangles];
-                  //   let targetRectIndex = null;
-
-                  //   if (newRect) {
-                  //     targetRectIndex = rectangles.findIndex(
-                  //       (rect) => rect === newRect,
-                  //     );
-                  //   } else if (selectedRectIndex !== null) {
-                  //     targetRectIndex = selectedRectIndex;
-                  //   }
-
-                    if (selectedRectIndex !== -1) {
-                      updatedRectangles[selectedRectIndex] = {
-                        ...updatedRectangles[selectedRectIndex],
-                        label: e.key.toUpperCase(),
-                      };
-                      setRectangles(updatedRectangles);
-                    }
-                  }
-                };
-
-                window.addEventListener("keydown", handleKeyDown);
-
-                return () => {
-                  window.removeEventListener("keydown", handleKeyDown);
-                };
-              }, [newRect, selectedRectIndex, rectangles]);
-
-              useEffect(() => {
-                const canvas = canvasRef.current;
-                const handleWheel = (e) => {
-                  e.preventDefault();
-                  const rect = canvas.getBoundingClientRect();
-                  console.log({ getBoundingClientRect: rect });
-                  const x = (e.clientX - rect.left - originX) / scale;
-                  const y = (e.clientY - rect.top - originY) / scale;
-                  const deltaScale = e.deltaY * -0.005;
-                  const newScale = Math.max(scale + deltaScale, 0.1);
-                  setScale(newScale);
-                  setOriginX(originX - x * deltaScale);
-                  setOriginY(originY - y * deltaScale);
-                };
-                canvas.addEventListener("wheel", handleWheel, { passive: false });
-                return () => {
-                  canvas.removeEventListener("wheel", handleWheel);
-                };
-              }, [originX, originY, scale]);
-
-              const updateLabel = (index, newLabel) => {
-                const updatedRectangles = [...rectangles];
-                updatedRectangles[index] = {
-                  ...updatedRectangles[index],
-                  label: newLabel,
-                };
-                setRectangles(updatedRectangles);
-              };
-
-              const handleDelete = (index) => {
-                const updatedRectangles = rectangles.filter((_, i) => i !== index);
-                setRectangles(updatedRectangles);
-              };
-
-              console.log({ rectangles: rectangles });
-
-
-              return (
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "row",
-                    alignItems: "center",
-                  }}
-                >
-                  <div>
-                    <input
-                      type="file"
-                      onChange={handleImageChange}
-                      accept="image/*"
-                    />
-                    <button onClick={resetView}>Reset View</button>
-                    <button onClick={handleReset}>Reset Everything</button>
-                  </div>
-                  <canvas
-                    ref={canvasRef}
-                    width={800}
-                    height={600}
-                    onMouseDown={handleMouseDown}
-                    onMouseMove={handleMouseMove}
-                    onMouseUp={handleMouseUp}
-                    style={{ border: "1px solid black", margin: "10px" }}
-                  />
-                  <img
-                    ref={imgRef}
-                    src={image}
-                    alt=""
-                    style={{ display: "none" }}
-                    onLoad={() => setImageLoaded(true)}
-                  />{" "}
-                  {/* Set imageLoaded to true when the image finishes loading */}
-                  <div>
-                    <h3>Annotations</h3>
-                    <table border="1">
-                      <thead>
-                        <tr>
-                          <th>Label</th>
-                          <th>X</th>
-                          <th>Y</th>
-                          <th>Width</th>
-                          <th>Height</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {rectangles.map((rect, index) => (
-                          <tr
-                            key={index}
-                            className={index == selectedRectIndex ? "highlight" : ""}
-                            onClick={() => setSelectedRectIndex(index)}
-                          >
-                            <td><input
-                type="text"
-                value={
-                  rect.label
-                }
-              //   onChange={(e) => {
-              //     // if (selectedRectIndex !== null) {
-              //     //   const newRectangles = [...rectangles];
-              //     //   newRectangles[selectedRectIndex].label =
-              //     //     e.target.value;
-              //     //   setRectangles(newRectangles);
-              //     //   drawImageAndRectangles(); // call your drawing function
-              //     // }
-              //   }}
-              />
-      </td>
-                            <td>{rect.x}</td>
-                            <td>{rect.y}</td>
-                            <td>{rect.width}</td>
-                            <td>{rect.height}</td>
-                            <td>
-                              <button onClick={() => handleDelete(index)}>
-                                Delete
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              );
+          const handleMouseMove = (e) => {
+            if (dragStart) {
+              const dx = e.clientX - dragStart.x;
+              const dy = e.clientY - dragStart.y;
+              setOriginX(originX + dx / scale);
+              setOriginY(originY + dy / scale);
+              setDragStart({ x: e.clientX, y: e.clientY });
             }
 
-            ReactDOM.render(<ImageAnnotator />, document.getElementById("root"));
+            // Tooltip handling code
+            const imageWidth = imgRef.current.width;
+            const imageHeight = imgRef.current.height;
+            // Calculate the coordinates relative to the canvas
+            const rect = e.target.getBoundingClientRect();
+            const x = (e.clientX - rect.left - originX) / scale;
+            const y = imageHeight - (e.clientY - rect.top - originY) / scale;
+
+            // Ignore mouse events outside the image area
+            if (x < 0 || x > imageWidth || y < 0 || y > imageHeight) {
+              setTooltip(null);
+              return;
+            }
+
+            // Set the tooltip text
+            setTooltip(`X: ${Math.floor(x)}, Y: ${Math.floor(y)}`);
+
+            // Set the tooltip position
+            setTooltipPosition({ x: e.clientX + 10, y: e.clientY + 10 });
+          };
+
+          const handleMouseUp = () => {
+            setDragStart(null);
+          };
+
+          document.addEventListener("mousedown", handleMouseDown);
+          document.addEventListener("mousemove", handleMouseMove);
+          document.addEventListener("mouseup", handleMouseUp);
+
+          return () => {
+            document.removeEventListener("mousedown", handleMouseDown);
+            document.removeEventListener("mousemove", handleMouseMove);
+            document.removeEventListener("mouseup", handleMouseUp);
+          };
+        }, [dragStart, originX, originY, scale]);
+
+        // make cursor into the dragging cursor when dragging
+        useEffect(() => {
+          const canvas = canvasRef.current;
+          if (!drawing && draggingRectIndex !== -1) {
+            // If a rectangle is being dragged, change the cursor to 'move'
+            canvas.style.cursor = "move";
+          } else {
+            // If no rectangle is being dragged, change the cursor back to 'default'
+            canvas.style.cursor = "cursor";
+          }
+        }, [draggingRectIndex]);
+
+        // Function to check if two rectangles intersect
+        const checkIntersection = (rect1, rect2) => {
+          return (
+            rect1.x < rect2.x + rect2.width &&
+            rect2.x < rect1.x + rect1.width &&
+            rect1.y < rect2.y + rect2.height &&
+            rect2.y < rect1.y + rect1.height
+          );
+        };
+
+        const drawImageAndRectangles = () => {
+          const canvas = canvasRef.current;
+
+          resizeCanvasToDisplaySize(canvas);
+
+          const ctx = canvas.getContext("2d");
+          if (imageLoaded) {
+            const img = imgRef.current;
+            ctx.save();
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.translate(originX, originY);
+            ctx.scale(scale, scale);
+            ctx.drawImage(img, 0, 0);
+
+            // Draw rectangles
+            rectangles.forEach((rect, index) => {
+              ctx.beginPath();
+              if (index === selectedRectIndex) {
+                // Style for selected rectangle
+                ctx.strokeStyle = "red";
+                ctx.fillStyle = "rgba(211, 211, 211, 0.5)"; // 50% opaque light gray
+              } else {
+                // Style for normal rectangles
+                ctx.strokeStyle = "red";
+                ctx.fillStyle = "transparent";
+              }
+
+              // set the line width to 1 pixel divided by the scale
+              ctx.lineWidth = 1 / scale;
+
+              ctx.rect(rect.x, rect.y, rect.width, rect.height);
+              ctx.stroke();
+              ctx.fill();
+
+              if (rect.label) {
+                // Calculate the font size based on the size of the rectangle and the zoom level
+                const fontSize = Math.min(rect.width, rect.height) / scale;
+
+                // Set the font, fill style, and text shadow for the label
+                ctx.font = `${fontSize}px Arial`;
+                ctx.fillStyle = "white";
+                ctx.textBaseline = "top";
+                const textMetrics = ctx.measureText(rect.label);
+                ctx.fillRect(
+                  rect.x,
+                  rect.y,
+                  textMetrics.width,
+                  parseInt(ctx.font, 10)
+                );
+                ctx.fillText(rect.label, rect.x, rect.y);
+              }
+            });
+
+            // Draw newRect
+            if (newRect) {
+              ctx.beginPath();
+              // Style for newRect
+              ctx.strokeStyle = "red";
+              ctx.fillStyle = "rgba(255, 0, 0, 0.3)"; // 30% opaque red
+              ctx.rect(newRect.x, newRect.y, newRect.width, newRect.height);
+              ctx.stroke();
+              ctx.fill();
+            }
+
+            ctx.restore();
+          }
+        };
+
+        useEffect(() => {
+          drawImageAndRectangles();
+        }, [
+          rectangles,
+          selectedRectIndex,
+          originX,
+          originY,
+          scale,
+          imageLoaded,
+          newRect,
+        ]);
+
+        useEffect(() => {
+          localStorage.setItem("rectangles", JSON.stringify(rectangles)); // Store rectangles in localStorage whenever they change
+        }, [rectangles]);
+
+        const handleMouseDown = (e) => {
+          const canvas = canvasRef.current;
+          const rect = canvasRef.current.getBoundingClientRect();
+          const adjustedX = (e.clientX - rect.left - originX) / scale;
+          const adjustedY = (e.clientY - rect.top - originY) / scale;
+
+          // Check if a rectangle was clicked
+          const clickedRectIndex = rectangles.findIndex(
+            (rect) =>
+              adjustedX >= rect.x &&
+              adjustedX <= rect.x + rect.width &&
+              adjustedY >= rect.y &&
+              adjustedY <= rect.y + rect.height
+          );
+
+          if (clickedRectIndex !== -1) {
+            setSelectedRectIndex(clickedRectIndex);
+          } else {
+            setDrawing(true);
+            setNewRect({ x: adjustedX, y: adjustedY, width: 0, height: 0 });
+          }
+        };
+
+        const handleMouseMove = (e) => {
+          const rect = canvasRef.current.getBoundingClientRect();
+          const adjustedX = (e.clientX - rect.left - originX) / scale;
+          const adjustedY = (e.clientY - rect.top - originY) / scale;
+          if (drawing && newRect) {
+            const rect = canvasRef.current.getBoundingClientRect();
+            const moveX = (e.clientX - rect.left - originX) / scale;
+            const moveY = (e.clientY - rect.top - originY) / scale;
+            setNewRect({
+              ...newRect,
+              width: moveX - newRect.x,
+              height: moveY - newRect.y,
+            });
+          }
+        };
+
+        const handleMouseUp = () => {
+          if (drawing && newRect) {
+            let { x, y, width, height } = newRect;
+            setDrawing(false);
+
+            // If width is negative, adjust x and make width positive
+            if (width < 0) {
+              x = x + width;
+              width = Math.abs(width);
+            }
+
+            // If height is negative, adjust y and make height positive
+            if (height < 0) {
+              y = y + height;
+              height = Math.abs(height);
+            }
+            const updatedRect = {
+              x: Math.round(x),
+              y: Math.round(y),
+              width: Math.round(width),
+              height: Math.round(height),
+            };
+            const updatedRectangles = [...rectangles, updatedRect].filter(
+              (rect) => rect.width !== 0 && rect.height !== 0
+            );
+
+            const intersects = rectangles.some((rect) =>
+              checkIntersection(newRect, rect)
+            );
+            if (!intersects) {
+              setRectangles(updatedRectangles);
+              setSelectedRectIndex(rectangles.length);
+            }
+            setNewRect(null);
+          }
+          //   setDraggingRectIndex(-1);
+        };
+
+        useEffect(() => {
+          const handleKeyDown = (e) => {
+            if (/^[a-z0-9-+=_\!\@\#\$\%\^\&\*\(\)]$/i.test(e.key)) {
+              const updatedRectangles = [...rectangles];
+              if (
+                selectedRectIndex !== -1 &&
+                selectedRectIndex !== null &&
+                selectedRectIndex < rectangles.length
+              ) {
+                updatedRectangles[selectedRectIndex] = {
+                  ...updatedRectangles[selectedRectIndex],
+                  label: e.key.toUpperCase(),
+                };
+                setRectangles(updatedRectangles);
+              }
+            }
+          };
+
+          window.addEventListener("keydown", handleKeyDown);
+
+          return () => {
+            window.removeEventListener("keydown", handleKeyDown);
+          };
+        }, [newRect, selectedRectIndex, rectangles]);
+
+        useEffect(() => {
+          const canvas = canvasRef.current;
+          const handleWheel = (e) => {
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            const x = (e.clientX - rect.left - originX) / scale;
+            const y = (e.clientY - rect.top - originY) / scale;
+            const deltaScale = e.deltaY * -0.005;
+            const newScale = Math.max(scale + deltaScale, 0.1);
+            setScale(newScale);
+            setOriginX(originX - x * deltaScale);
+            setOriginY(originY - y * deltaScale);
+          };
+          canvas.addEventListener("wheel", handleWheel, { passive: false });
+          return () => {
+            canvas.removeEventListener("wheel", handleWheel);
+          };
+        }, [originX, originY, scale]);
+
+        const updateLabel = (index, newLabel) => {
+          const updatedRectangles = [...rectangles];
+          updatedRectangles[index] = {
+            ...updatedRectangles[index],
+            label: newLabel,
+          };
+          setRectangles(updatedRectangles);
+        };
+
+        const handleDelete = (index) => {
+          const updatedRectangles = rectangles.filter((_, i) => i !== index);
+          setRectangles(updatedRectangles);
+        };
+
+        return (
+          <div className="flex-container">
+            <div className="full-width">
+              <div className="controls">
+                <input
+                  type="file"
+                  onChange={handleImageChange}
+                  accept="image/*"
+                />
+                <button onClick={resetView}>Reset View</button>
+                <button onClick={handleReset}>Reset Everything</button>
+              </div>
+            </div>
+            <div className="flex-row">
+              <canvas
+                className="canvas"
+                ref={canvasRef}
+                width={800}
+                height={600}
+                onMouseDown={handleMouseDown}
+                onMouseMove={handleMouseMove}
+                onMouseUp={handleMouseUp}
+                style={{ border: "1px solid black", margin: "10px" }}
+              />
+              <img
+                ref={imgRef}
+                src={image}
+                alt=""
+                style={{ display: "none" }}
+                onLoad={() => setImageLoaded(true)}
+              />{" "}
+              {/* Set imageLoaded to true when the image finishes loading */}
+              <div className="table">
+                <h3>Annotations</h3>
+                <table
+                  className="scrollableTable"
+                  border="1"
+                  style={{
+                    height: "100vh",
+                    overflowY: "auto",
+                    display: "block",
+                  }}
+                >
+                  <thead>
+                    <tr>
+                      <th>Label</th>
+                      <th>X</th>
+                      <th>Y</th>
+                      <th>Width</th>
+                      <th>Height</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rectangles.map((rect, index) => (
+                      <tr
+                        key={index}
+                        className={
+                          index == selectedRectIndex ? "highlight" : ""
+                        }
+                        onClick={() => setSelectedRectIndex(index)}
+                        ref={rowRefs.current[index]}
+                      >
+                        <td>
+                          <code>{rect.label} </code>
+                        </td>
+                        <td>{rect.x}</td>
+                        <td>{rect.y}</td>
+                        <td>{rect.width}</td>
+                        <td>{rect.height}</td>
+                        <td>
+                          <button onClick={() => handleDelete(index)}>
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+                <div className="scrollableDiv" style={{ overflow: "auto" }}>
+                <pre>
+                  {rectangles
+                  .map(
+                    (rect, index) =>
+                    `"${rect.label}" ${rect.x} ${
+                    imgRef?.current?.height - (rect.y + rect.height)
+                    } ${rect.height} ${rect.width} 0`
+                  )
+                  .join("\n")}
+                </pre>
+                </div>
+              </div>
+              {tooltip && ( <Tooltip text={tooltip} position={tooltipPosition} /> )}
+          </div>
+        );
+      }
+
+      ReactDOM.render(<ImageAnnotator />, document.getElementById("root"));
     </script>
   </body>
 </html>
